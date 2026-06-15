@@ -34,7 +34,7 @@ export function ProjectListScreen({ onOpen }: ProjectListScreenProps) {
    return (
       <Box flexDirection="column" height="100%">
          <Text bold color="blue">
-            Deploy Panel
+            stackctl
          </Text>
          <Text dimColor>{BASE_DIR}</Text>
          <Box marginTop={1} flexDirection="column" flexGrow={1}>

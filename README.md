@@ -1,8 +1,8 @@
-# deploy-panel
+# stackctl
 
-TUI para gerenciar projetos na VPS direto do terminal: git pull, Docker Compose, status de containers e logs.
+TUI para gerenciar projetos direto do terminal: git pull, Docker Compose, status de containers e logs.
 
-Sem servidor HTTP, sem porta exposta, sem senha. Roda localmente com acesso ao filesystem e aos binários `git` e `docker`.
+Sem servidor HTTP, sem porta exposta, sem senha. Roda localmente com acesso ao filesystem e aos binários `git` e `docker` — na sua máquina, em um servidor remoto ou onde os projetos estiverem.
 
 ## Requisitos
 
@@ -14,7 +14,7 @@ Sem servidor HTTP, sem porta exposta, sem senha. Roda localmente com acesso ao f
 
 ```bash
 git clone <repo>
-cd deploy-panel
+cd stackctl
 npm install
 ```
 
@@ -42,6 +42,13 @@ npm start
 ```
 
 O build gera `dist/cli.js`, um único arquivo executável (~1,8 MB) com todas as dependências embutidas.
+
+Também é possível instalar globalmente após o build:
+
+```bash
+npm link
+stackctl
+```
 
 ## Navegação
 
@@ -78,6 +85,23 @@ O painel usa **context switch em tela cheia**: cada tela ocupa 100% do terminal.
 |-------|------|
 | Enter ou Esc | Voltar ao dashboard |
 
+## Estrutura
+
+```
+src/
+  cli.tsx              entry point
+  config/env.ts        carrega .env e valida PROJECTS_ROOT
+  lib/
+    docker.ts          compose up/down, containers, logs
+    git.ts             status e pull
+    shell.ts           exec de comandos e path seguro
+    projects.ts        lista pastas em PROJECTS_ROOT
+  tui/
+    App.tsx            roteamento entre telas
+    ProjectListScreen.tsx
+    ProjectDashboardScreen.tsx
+    LogsScreen.tsx
+```
 
 ## Scripts
 
