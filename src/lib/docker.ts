@@ -212,18 +212,49 @@ export async function composeDown(projectPath: string): Promise<void> {
    await exec(command, { cwd: projectPath })
 }
 
+async function assertValidService(
+   projectPath: string,
+   service: string,
+): Promise<void> {
+   const services = await getComposeServices(projectPath)
+   if (!services.includes(service)) {
+      throw new Error('Serviço inválido')
+   }
+}
+
 export async function composeStartService(
    projectPath: string,
    service: string,
 ): Promise<void> {
    if (!(await hasComposeFile(projectPath))) return
 
-   const services = await getComposeServices(projectPath)
-   if (!services.includes(service)) {
-      throw new Error('Serviço inválido')
-   }
+   await assertValidService(projectPath, service)
 
    const command = await composeCommand(projectPath, `up -d ${service}`)
+   await exec(command, { cwd: projectPath })
+}
+
+export async function composeStopService(
+   projectPath: string,
+   service: string,
+): Promise<void> {
+   if (!(await hasComposeFile(projectPath))) return
+
+   await assertValidService(projectPath, service)
+
+   const command = await composeCommand(projectPath, `stop ${service}`)
+   await exec(command, { cwd: projectPath })
+}
+
+export async function composeRestartService(
+   projectPath: string,
+   service: string,
+): Promise<void> {
+   if (!(await hasComposeFile(projectPath))) return
+
+   await assertValidService(projectPath, service)
+
+   const command = await composeCommand(projectPath, `restart ${service}`)
    await exec(command, { cwd: projectPath })
 }
 

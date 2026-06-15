@@ -1,30 +1,29 @@
-import {
-   Alert,
-   Badge,
-   ConfirmInput,
-   Select,
-   Spinner,
-   StatusMessage,
-} from '@inkjs/ui'
+import { Badge, ConfirmInput, Spinner, StatusMessage } from '@inkjs/ui'
 import { Box, Text, useInput } from 'ink'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
    type ContainerInfo,
    composeDown,
+   composeRestartService,
    composeStartService,
+   composeStopService,
    composeUp,
    getContainers,
    hasComposeFile,
 } from '../lib/docker'
-import { getGitStatus, gitPull } from '../lib/git'
+import {
+   type GitSyncStatus,
+   getGitStatus,
+   gitPull,
+   gitSyncLabel,
+} from '../lib/git'
 import { getSafePath } from '../lib/shell'
 import {
    containerLabel,
    containerStatusColor,
    containerStatusLabel,
-   isContainerCreated,
-   isContainerRunning,
 } from './container-utils'
+import { type MenuOption, MenuSelect } from './MenuSelect'
 import { useListHeight } from './use-list-height'
 
 interface ProjectDashboardScreenProps {
@@ -38,12 +37,25 @@ type PendingAction =
    | { type: 'up' }
    | { type: 'down' }
    | { type: 'start'; service: string }
+   | { type: 'stop'; service: string }
+   | { type: 'restart'; service: string }
 
 interface ProjectData {
    gitStatus: string
-   needsPull: boolean
+   gitSyncStatus: GitSyncStatus
    hasCompose: boolean
    containers: ContainerInfo[]
+}
+
+function gitSyncColor(
+   syncStatus: GitSyncStatus,
+): 'green' | 'yellow' | 'red' | undefined {
+   if (syncStatus === 'atualizado') return 'green'
+   if (syncStatus === 'erro') return 'red'
+   if (syncStatus === 'desatualizado' || syncStatus === 'divergente') {
+      return 'yellow'
+   }
+   return undefined
 }
 
 function truncateGitStatus(status: string, maxLines = 6): string {
@@ -67,6 +79,11 @@ export function ProjectDashboardScreen({
       null,
    )
    const [selectKey, setSelectKey] = useState(0)
+   const [menuSection, setMenuSection] = useState<'containers' | 'actions'>(
+      'containers',
+   )
+   const [selectedContainer, setSelectedContainer] =
+      useState<ContainerInfo | null>(null)
 
    const loadProject = useCallback(async () => {
       setLoading(true)
@@ -75,7 +92,7 @@ export function ProjectDashboardScreen({
       try {
          const targetPath = await getSafePath(name)
          const composeAvailable = await hasComposeFile(targetPath)
-         const [{ status: gitStatus, needsPull }, containers] =
+         const [{ status: gitStatus, syncStatus: gitSyncStatus }, containers] =
             await Promise.all([
                getGitStatus(targetPath),
                composeAvailable
@@ -85,7 +102,7 @@ export function ProjectDashboardScreen({
 
          setData({
             gitStatus,
-            needsPull,
+            gitSyncStatus,
             hasCompose: composeAvailable,
             containers,
          })
@@ -125,6 +142,14 @@ export function ProjectDashboardScreen({
                await composeStartService(targetPath, action.service)
                setStatusMessage(`Serviço ${action.service} iniciado`)
             }
+            if (action.type === 'stop') {
+               await composeStopService(targetPath, action.service)
+               setStatusMessage(`Serviço ${action.service} desligado`)
+            }
+            if (action.type === 'restart') {
+               await composeRestartService(targetPath, action.service)
+               setStatusMessage(`Serviço ${action.service} reiniciado`)
+            }
 
             await loadProject()
          } catch (e: unknown) {
@@ -132,40 +157,58 @@ export function ProjectDashboardScreen({
          } finally {
             setRunning(false)
             setPendingAction(null)
+            setSelectedContainer(null)
+            setMenuSection('containers')
             setSelectKey((key) => key + 1)
          }
       },
       [name, loadProject],
    )
 
-   const options = useMemo(() => {
-      const items: Array<{ label: string; value: string }> = [
-         { label: 'Git Pull', value: 'pull' },
+   const containerOptions = useMemo((): MenuOption[] => {
+      if (!data?.hasCompose) return []
+
+      return data.containers.map((container) => {
+         const label = containerLabel(container)
+         return {
+            label,
+            value: `container:${label}`,
+            render: ({ isFocused }) => (
+               <Box>
+                  {isFocused ? (
+                     <Text color="blue">{label} </Text>
+                  ) : (
+                     <Text>{label} </Text>
+                  )}
+                  <Badge color={containerStatusColor(container)}>
+                     {containerStatusLabel(container)}
+                  </Badge>
+               </Box>
+            ),
+         }
+      })
+   }, [data])
+
+   const containerActionOptions = useMemo((): MenuOption[] => {
+      if (!selectedContainer) return []
+
+      return [
+         { label: 'Iniciar', value: 'action:start' },
+         { label: 'Desligar', value: 'action:stop' },
+         { label: 'Restart', value: 'action:restart' },
+         { label: 'Logs', value: 'action:logs' },
+         { label: '← Voltar', value: 'back-container' },
       ]
+   }, [selectedContainer])
+
+   const generalOptions = useMemo((): MenuOption[] => {
+      const items: MenuOption[] = [{ label: 'Git Pull', value: 'pull' }]
 
       if (data?.hasCompose) {
          items.push(
-            { label: 'Subir stack', value: 'up' },
-            { label: 'Derrubar stack', value: 'down' },
+            { label: 'Subir todos os containers', value: 'up' },
+            { label: 'Derrubar todos os containers', value: 'down' },
          )
-      }
-
-      for (const container of data?.containers ?? []) {
-         const label = containerLabel(container)
-
-         if (!isContainerRunning(container)) {
-            items.push({
-               label: `  ↳ Iniciar ${label}`,
-               value: `start:${label}`,
-            })
-         }
-
-         if (isContainerCreated(container)) {
-            items.push({
-               label: `  ↳ Logs ${label}`,
-               value: `logs:${container.Name}`,
-            })
-         }
       }
 
       items.push(
@@ -180,6 +223,13 @@ export function ProjectDashboardScreen({
       (value: string) => {
          if (value === 'back') {
             onBack()
+            return
+         }
+
+         if (value === 'back-container') {
+            setSelectedContainer(null)
+            setMenuSection('containers')
+            setSelectKey((key) => key + 1)
             return
          }
 
@@ -204,22 +254,53 @@ export function ProjectDashboardScreen({
             return
          }
 
-         if (value.startsWith('start:')) {
-            const service = value.slice('start:'.length)
-            setPendingAction({ type: 'start', service })
+         if (value.startsWith('container:')) {
+            const label = value.slice('container:'.length)
+            const container = data?.containers.find(
+               (item) => containerLabel(item) === label,
+            )
+            if (container) {
+               setSelectedContainer(container)
+               setMenuSection('containers')
+               setSelectKey((key) => key + 1)
+            }
             return
          }
 
-         if (value.startsWith('logs:')) {
-            const containerName = value.slice('logs:'.length)
-            onLogs(containerName)
+         if (selectedContainer && value.startsWith('action:')) {
+            const service = containerLabel(selectedContainer)
+
+            if (value === 'action:start') {
+               setPendingAction({ type: 'start', service })
+               return
+            }
+
+            if (value === 'action:stop') {
+               setPendingAction({ type: 'stop', service })
+               return
+            }
+
+            if (value === 'action:restart') {
+               setPendingAction({ type: 'restart', service })
+               return
+            }
+
+            if (value === 'action:logs') {
+               onLogs(selectedContainer.Name)
+            }
          }
       },
-      [onBack, onLogs, loadProject],
+      [onBack, onLogs, loadProject, data, selectedContainer],
    )
 
    useInput((_input, key) => {
       if (key.escape && !pendingAction && !running) {
+         if (selectedContainer) {
+            setSelectedContainer(null)
+            setMenuSection('containers')
+            setSelectKey((key) => key + 1)
+            return
+         }
          onBack()
       }
    })
@@ -231,8 +312,24 @@ export function ProjectDashboardScreen({
            ? 'Confirmar subir stack?'
            : pendingAction.type === 'down'
              ? 'Confirmar derrubar stack?'
-             : `Confirmar iniciar ${pendingAction.service}?`
+             : pendingAction.type === 'start'
+               ? `Confirmar iniciar ${pendingAction.service}?`
+               : pendingAction.type === 'stop'
+                 ? `Confirmar desligar ${pendingAction.service}?`
+                 : `Confirmar restart ${pendingAction.service}?`
       : null
+
+   const gitSyncTextColor = data ? gitSyncColor(data.gitSyncStatus) : undefined
+   const sectionListHeight = Math.max(3, Math.floor(listHeight / 2))
+   const showMenus = !loading && !running && !pendingAction
+   const hasContainerList = Boolean(
+      data?.hasCompose && containerOptions.length > 0 && !selectedContainer,
+   )
+   const containersMenuActive =
+      Boolean(selectedContainer) ||
+      (hasContainerList && menuSection === 'containers')
+   const actionsMenuActive =
+      !selectedContainer && (!hasContainerList || menuSection === 'actions')
 
    return (
       <Box flexDirection="column" height="100%">
@@ -241,40 +338,81 @@ export function ProjectDashboardScreen({
          </Text>
 
          <Box marginTop={1} flexDirection="column">
-            <Text bold>Git</Text>
-            {data?.needsPull && (
-               <Box marginTop={1}>
-                  <Alert variant="warning">
-                     Atualizações disponíveis na branch remota
-                  </Alert>
-               </Box>
-            )}
-            {data && (
+            <Box>
+               <Text bold>Git</Text>
+               {data &&
+                  (gitSyncTextColor ? (
+                     <Text color={gitSyncTextColor}>
+                        {' '}
+                        · {gitSyncLabel(data.gitSyncStatus)}
+                     </Text>
+                  ) : (
+                     <Text dimColor> · {gitSyncLabel(data.gitSyncStatus)}</Text>
+                  ))}
+            </Box>
+            {data?.gitStatus && (
                <Box marginTop={1}>
                   <Text>{truncateGitStatus(data.gitStatus)}</Text>
                </Box>
             )}
          </Box>
 
-         {data?.hasCompose && data.containers.length > 0 && (
-            <Box marginTop={1} flexDirection="column">
-               <Text bold>Containers</Text>
-               <Box marginTop={1} flexDirection="column">
-                  {data.containers.map((container) => (
-                     <Box key={containerLabel(container)}>
-                        <Badge color={containerStatusColor(container)}>
-                           {containerStatusLabel(container)}
-                        </Badge>
-                        <Text> {containerLabel(container)}</Text>
-                     </Box>
-                  ))}
+         <Box marginTop={1} flexDirection="column">
+            <Text bold>Containers</Text>
+            {selectedContainer ? (
+               <Box marginTop={1}>
+                  <Badge color={containerStatusColor(selectedContainer)}>
+                     {containerStatusLabel(selectedContainer)}
+                  </Badge>
+                  <Text> {containerLabel(selectedContainer)}</Text>
                </Box>
-            </Box>
-         )}
+            ) : !data?.hasCompose && data ? (
+               <Box marginTop={1}>
+                  <Text dimColor>Sem docker-compose neste projeto</Text>
+               </Box>
+            ) : null}
+            {showMenus && selectedContainer && (
+               <Box marginTop={1}>
+                  <MenuSelect
+                     key={`actions-${selectKey}`}
+                     isActive={containersMenuActive}
+                     visibleOptionCount={sectionListHeight}
+                     options={containerActionOptions}
+                     onChange={handleSelect}
+                  />
+               </Box>
+            )}
+            {showMenus && !selectedContainer && data?.hasCompose && (
+               <Box marginTop={1}>
+                  <MenuSelect
+                     key={`containers-${selectKey}`}
+                     isActive={containersMenuActive}
+                     visibleOptionCount={sectionListHeight}
+                     options={containerOptions}
+                     onLeaveDown={() => setMenuSection('actions')}
+                     onChange={handleSelect}
+                  />
+               </Box>
+            )}
+         </Box>
 
-         {!data?.hasCompose && data && (
-            <Box marginTop={1}>
-               <Text dimColor>Sem docker-compose neste projeto</Text>
+         {showMenus && !selectedContainer && (
+            <Box marginTop={1} flexDirection="column">
+               <Text bold>Ações</Text>
+               <Box marginTop={1}>
+                  <MenuSelect
+                     key={`general-${selectKey}`}
+                     isActive={actionsMenuActive}
+                     visibleOptionCount={sectionListHeight}
+                     options={generalOptions}
+                     onLeaveUp={() => {
+                        if (hasContainerList) {
+                           setMenuSection('containers')
+                        }
+                     }}
+                     onChange={handleSelect}
+                  />
+               </Box>
             </Box>
          )}
 
@@ -305,14 +443,6 @@ export function ProjectDashboardScreen({
                      }}
                   />
                </Box>
-            )}
-            {!loading && !running && !pendingAction && (
-               <Select
-                  key={selectKey}
-                  visibleOptionCount={listHeight}
-                  options={options}
-                  onChange={handleSelect}
-               />
             )}
          </Box>
 

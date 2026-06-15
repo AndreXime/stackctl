@@ -23,8 +23,8 @@ export function ProjectListScreen({ onOpen }: ProjectListScreenProps) {
          .finally(() => setLoading(false))
    }, [])
 
-   useInput((input, key) => {
-      if (input === 'q' || (key.ctrl && input === 'c')) {
+   useInput((_input, key) => {
+      if (key.escape || (key.ctrl && _input === 'c')) {
          exit()
       }
    })
@@ -52,7 +52,7 @@ export function ProjectListScreen({ onOpen }: ProjectListScreenProps) {
             )}
          </Box>
          <Box marginTop={1}>
-            <Text dimColor>↑↓ navegar · Enter abrir · q sair</Text>
+            <Text dimColor>↑↓ navegar · Enter abrir · Esc sair</Text>
          </Box>
       </Box>
    )
