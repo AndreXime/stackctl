@@ -1,0 +1,32 @@
+{
+   "name": "deploy-panel",
+   "version": "0.6.0",
+   "description": "Painel de deploy para gerenciar projetos na VPS",
+   "license": "ISC",
+   "type": "module",
+   "bin": {
+      "deploy-panel": "./dist/cli.js"
+   },
+   "scripts": {
+      "dev": "tsx watch src/cli.tsx",
+      "start": "./dist/cli.js",
+      "build": "node esbuild.config.mjs",
+      "lint": "biome check --write . && tsc --noEmit",
+      "format": "biome format --write ."
+   },
+   "dependencies": {
+      "@inkjs/ui": "^2.0.0",
+      "dotenv": "^17.4.2",
+      "ink": "^7.0.6",
+      "react": "^19.2.7"
+   },
+   "devDependencies": {
+      "@biomejs/biome": "^2.5.0",
+      "@types/node": "^25.9.3",
+      "@types/react": "^19.2.17",
+      "esbuild": "^0.28.1",
+      "tsx": "^4.22.4",
+      "typescript": "^6.0.3"
+   },
+   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319"
+}
