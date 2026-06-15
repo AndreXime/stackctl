@@ -4,6 +4,8 @@ TUI para gerenciar projetos direto do terminal: git pull, Docker Compose, status
 
 Sem servidor HTTP, sem porta exposta, sem senha. Roda localmente com acesso ao filesystem e aos binários `git` e `docker` — na sua máquina, em um servidor remoto ou onde os projetos estiverem.
 
+[Ver screenshots](SCREENSHOTS.md)
+
 ## Requisitos
 
 - Node.js 22+
@@ -60,24 +62,22 @@ O painel usa **context switch em tela cheia**: cada tela ocupa 100% do terminal.
 |-------|------|
 | ↑ ↓ | Navegar |
 | Enter | Abrir projeto |
-| q | Sair |
+| Esc | Sair |
 
 ### Dashboard do projeto
 
 | Tecla | Ação |
 |-------|------|
-| ↑ ↓ | Navegar menu |
-| Enter | Selecionar ação |
+| ↑ ↓ | Navegar entre containers e ações |
+| Enter | Selecionar |
 | Y / n | Confirmar ou cancelar ações destrutivas |
-| Esc | Voltar para a lista |
+| Esc | Voltar (lista ou submenu do container) |
 
-**Ações disponíveis:**
+**Seções:**
 
-- Git Pull
-- Subir / derrubar stack (se houver `docker-compose.yml` ou `compose.yaml`)
-- Iniciar serviço individual
-- Ver logs de container (últimas 100 linhas)
-- Atualizar dados do projeto
+- **Git** — status de sincronização com o remoto e arquivos modificados
+- **Containers** — lista com badge de status; Enter abre Iniciar, Desligar, Restart e Logs
+- **Ações** — Git Pull, subir/derrubar stack, atualizar e voltar
 
 ### Logs
 
@@ -98,6 +98,7 @@ src/
     projects.ts        lista pastas em PROJECTS_ROOT
   tui/
     App.tsx            roteamento entre telas
+    MenuSelect.tsx     menu com suporte a conteúdo customizado
     ProjectListScreen.tsx
     ProjectDashboardScreen.tsx
     LogsScreen.tsx
