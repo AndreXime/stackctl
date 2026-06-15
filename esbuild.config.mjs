@@ -19,9 +19,22 @@ await build({
    format: 'esm',
    outfile,
    jsx: 'automatic',
-   alias: {
-      'react-devtools-core': './esbuild-stubs/react-devtools-core.mjs',
-   },
+   plugins: [
+      {
+         name: 'stub-react-devtools-core',
+         setup(buildApi) {
+            buildApi.onResolve({ filter: /^react-devtools-core$/ }, () => ({
+               path: 'react-devtools-core',
+               namespace: 'stub',
+            }))
+            buildApi.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
+               contents:
+                  'export default { initialize() {}, connectToDevTools() {} }',
+               loader: 'js',
+            }))
+         },
+      },
+   ],
    banner: {
       js: `#!/usr/bin/env node
 import { createRequire } from 'node:module';
