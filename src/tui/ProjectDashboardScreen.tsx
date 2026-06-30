@@ -1,13 +1,16 @@
 import { Badge, ConfirmInput, Spinner, StatusMessage } from '@inkjs/ui'
 import { Box, Text, useInput } from 'ink'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+   type ContainerDetails,
    type ContainerInfo,
+   clearContainerVolumes,
    composeDown,
    composeRestartService,
    composeStartService,
    composeStopService,
    composeUp,
+   getContainerDetails,
    getContainers,
    hasComposeFile,
 } from '../lib/docker'
@@ -22,6 +25,7 @@ import {
    containerLabel,
    containerStatusColor,
    containerStatusLabel,
+   isContainerCreated,
 } from './container-utils'
 import { type MenuOption, MenuSelect } from './MenuSelect'
 import { useListHeight } from './use-list-height'
@@ -39,6 +43,7 @@ type PendingAction =
    | { type: 'start'; service: string }
    | { type: 'stop'; service: string }
    | { type: 'restart'; service: string }
+   | { type: 'clear-volumes'; service: string; containerName: string }
 
 interface ProjectData {
    gitStatus: string
@@ -84,6 +89,44 @@ export function ProjectDashboardScreen({
    )
    const [selectedContainer, setSelectedContainer] =
       useState<ContainerInfo | null>(null)
+   const [containerDetails, setContainerDetails] =
+      useState<ContainerDetails | null>(null)
+   const [detailsLoading, setDetailsLoading] = useState(false)
+   const [detailsError, setDetailsError] = useState<string | null>(null)
+   const selectedContainerRef = useRef<ContainerInfo | null>(null)
+   selectedContainerRef.current = selectedContainer
+   const detailsRequestId = useRef(0)
+
+   const fetchContainerDetails = useCallback(
+      async (container: ContainerInfo) => {
+         const requestId = ++detailsRequestId.current
+
+         if (!isContainerCreated(container)) {
+            setContainerDetails(null)
+            setDetailsError(null)
+            setDetailsLoading(false)
+            return
+         }
+
+         setDetailsLoading(true)
+         setDetailsError(null)
+         setContainerDetails(null)
+
+         try {
+            const details = await getContainerDetails(container.Name)
+            if (requestId !== detailsRequestId.current) return
+            setContainerDetails(details)
+         } catch (e: unknown) {
+            if (requestId !== detailsRequestId.current) return
+            setDetailsError(e instanceof Error ? e.message : String(e))
+         } finally {
+            if (requestId === detailsRequestId.current) {
+               setDetailsLoading(false)
+            }
+         }
+      },
+      [],
+   )
 
    const loadProject = useCallback(async () => {
       setLoading(true)
@@ -110,12 +153,27 @@ export function ProjectDashboardScreen({
          setError(e instanceof Error ? e.message : String(e))
       } finally {
          setLoading(false)
+         const current = selectedContainerRef.current
+         if (current) {
+            await fetchContainerDetails(current)
+         }
       }
-   }, [name])
+   }, [name, fetchContainerDetails])
 
    useEffect(() => {
       loadProject()
    }, [loadProject])
+
+   useEffect(() => {
+      if (!selectedContainer) {
+         setContainerDetails(null)
+         setDetailsError(null)
+         setDetailsLoading(false)
+         return
+      }
+
+      void fetchContainerDetails(selectedContainer)
+   }, [selectedContainer, fetchContainerDetails])
 
    const runAction = useCallback(
       async (action: PendingAction) => {
@@ -150,6 +208,14 @@ export function ProjectDashboardScreen({
                await composeRestartService(targetPath, action.service)
                setStatusMessage(`Serviço ${action.service} reiniciado`)
             }
+            if (action.type === 'clear-volumes') {
+               await clearContainerVolumes(
+                  targetPath,
+                  action.containerName,
+                  action.service,
+               )
+               setStatusMessage(`Volumes de ${action.service} limpos`)
+            }
 
             await loadProject()
          } catch (e: unknown) {
@@ -157,12 +223,18 @@ export function ProjectDashboardScreen({
          } finally {
             setRunning(false)
             setPendingAction(null)
-            setSelectedContainer(null)
-            setMenuSection('containers')
+            if (action.type === 'clear-volumes') {
+               if (selectedContainerRef.current) {
+                  await fetchContainerDetails(selectedContainerRef.current)
+               }
+            } else {
+               setSelectedContainer(null)
+               setMenuSection('containers')
+            }
             setSelectKey((key) => key + 1)
          }
       },
-      [name, loadProject],
+      [name, loadProject, fetchContainerDetails],
    )
 
    const containerOptions = useMemo((): MenuOption[] => {
@@ -192,14 +264,28 @@ export function ProjectDashboardScreen({
    const containerActionOptions = useMemo((): MenuOption[] => {
       if (!selectedContainer) return []
 
-      return [
+      const hasClearableVolumes = containerDetails?.volumes.some(
+         (volume) => volume.type !== 'tmpfs',
+      )
+
+      const options: MenuOption[] = [
          { label: 'Iniciar', value: 'action:start' },
          { label: 'Desligar', value: 'action:stop' },
          { label: 'Restart', value: 'action:restart' },
          { label: 'Logs', value: 'action:logs' },
-         { label: '← Voltar', value: 'back-container' },
       ]
-   }, [selectedContainer])
+
+      if (hasClearableVolumes) {
+         options.push({
+            label: 'Limpar volumes',
+            value: 'action:clear-volumes',
+         })
+      }
+
+      options.push({ label: '← Voltar', value: 'back-container' })
+
+      return options
+   }, [selectedContainer, containerDetails])
 
    const generalOptions = useMemo((): MenuOption[] => {
       const items: MenuOption[] = [{ label: 'Git Pull', value: 'pull' }]
@@ -287,6 +373,15 @@ export function ProjectDashboardScreen({
 
             if (value === 'action:logs') {
                onLogs(selectedContainer.Name)
+               return
+            }
+
+            if (value === 'action:clear-volumes') {
+               setPendingAction({
+                  type: 'clear-volumes',
+                  service,
+                  containerName: selectedContainer.Name,
+               })
             }
          }
       },
@@ -316,7 +411,9 @@ export function ProjectDashboardScreen({
                ? `Confirmar iniciar ${pendingAction.service}?`
                : pendingAction.type === 'stop'
                  ? `Confirmar desligar ${pendingAction.service}?`
-                 : `Confirmar restart ${pendingAction.service}?`
+                 : pendingAction.type === 'clear-volumes'
+                   ? `Confirmar limpar volumes de ${pendingAction.service}? Todos os dados serão apagados.`
+                   : `Confirmar restart ${pendingAction.service}?`
       : null
 
    const gitSyncTextColor = data ? gitSyncColor(data.gitSyncStatus) : undefined
@@ -360,11 +457,71 @@ export function ProjectDashboardScreen({
          <Box marginTop={1} flexDirection="column">
             <Text bold>Containers</Text>
             {selectedContainer ? (
-               <Box marginTop={1}>
-                  <Badge color={containerStatusColor(selectedContainer)}>
-                     {containerStatusLabel(selectedContainer)}
-                  </Badge>
-                  <Text> {containerLabel(selectedContainer)}</Text>
+               <Box marginTop={1} flexDirection="column">
+                  <Box>
+                     <Badge color={containerStatusColor(selectedContainer)}>
+                        {containerStatusLabel(selectedContainer)}
+                     </Badge>
+                     <Text> {containerLabel(selectedContainer)}</Text>
+                  </Box>
+                  {!isContainerCreated(selectedContainer) ? (
+                     <Box marginTop={1}>
+                        <Text dimColor>Container ainda não foi criado</Text>
+                     </Box>
+                  ) : detailsLoading ? (
+                     <Box marginTop={1}>
+                        <Spinner label="Carregando detalhes..." />
+                     </Box>
+                  ) : detailsError ? (
+                     <Box marginTop={1}>
+                        <StatusMessage variant="error">
+                           {detailsError}
+                        </StatusMessage>
+                     </Box>
+                  ) : containerDetails ? (
+                     <Box marginTop={1} flexDirection="column">
+                        <Text bold>Portas</Text>
+                        {containerDetails.ports.length > 0 ? (
+                           containerDetails.ports.map((port) => (
+                              <Text key={`${port.host}-${port.container}`}>
+                                 {port.host} → {port.container}
+                              </Text>
+                           ))
+                        ) : (
+                           <Text dimColor>Nenhuma porta publicada</Text>
+                        )}
+
+                        <Box marginTop={1} flexDirection="column">
+                           <Text bold>Volumes</Text>
+                           {containerDetails.volumes.length > 0 ? (
+                              containerDetails.volumes.map((volume) => (
+                                 <Text
+                                    key={`${volume.destination}-${volume.source}`}
+                                 >
+                                    {volume.destination} ← {volume.source}
+                                    {volume.size ? ` (${volume.size})` : ''}
+                                    {!volume.size && volume.type !== 'tmpfs'
+                                       ? ' (tamanho indisponível)'
+                                       : ''}
+                                 </Text>
+                              ))
+                           ) : (
+                              <Text dimColor>Nenhum volume montado</Text>
+                           )}
+                        </Box>
+
+                        {containerDetails.image && (
+                           <Box marginTop={1}>
+                              <Text bold>Imagem </Text>
+                              <Text>
+                                 {containerDetails.image.name} ·{' '}
+                                 {containerDetails.image.size} · atualizada em{' '}
+                                 {containerDetails.image.created}
+                              </Text>
+                           </Box>
+                        )}
+                     </Box>
+                  ) : null}
                </Box>
             ) : !data?.hasCompose && data ? (
                <Box marginTop={1}>
