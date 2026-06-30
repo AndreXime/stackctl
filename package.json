@@ -1,6 +1,6 @@
 {
    "name": "stackctl",
-   "version": "0.6.0",
+   "version": "0.7.0",
    "description": "TUI para gerenciar projetos e stacks Docker no terminal",
    "license": "ISC",
    "type": "module",
