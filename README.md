@@ -8,7 +8,7 @@ Sem servidor HTTP, sem porta exposta, sem senha. Roda localmente com acesso ao f
 
 ## Requisitos
 
-- Node.js 22+
+- Node.js 26+
 - Git
 - Docker com Compose v2 (`docker compose`)
 
